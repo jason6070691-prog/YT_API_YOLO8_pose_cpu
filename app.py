@@ -25,7 +25,9 @@ from src.config_loader import load_config
 from src.database import Database
 from src.alert import generate_ai_report
 
-CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
+BASE_DIR = Path(__file__).resolve().parent
+CONFIG_PATH = BASE_DIR / "config.yaml"
+config = load_config(CONFIG_PATH)
 
 st.set_page_config(page_title="YOLOv8-Pose 行為/事件分析 Dashboard", layout="wide")
 
