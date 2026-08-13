@@ -17,6 +17,19 @@ from pathlib import Path
 import pandas as pd
 import plotly.express as px
 import streamlit as st
+import os
+import psycopg
+
+conn = psycopg.connect(os.environ["DATABASE_URL"])
+
+df = pd.read_sql(
+    "select * from frame_stats order by ts desc limit 100",
+    conn
+)
+
+st.image(
+    f"{os.environ['SUPABASE_URL']}/storage/v1/object/public/frames/latest_frame.jpg"
+)
 
 # 讓 dashboard/app.py 可以 import 到專案根目錄下的 src/
 sys.path.append(str(Path(__file__).resolve().parent.parent))
