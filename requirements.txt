@@ -7,3 +7,5 @@ streamlit
 pandas
 plotly
 torch
+psycopg[binary]
+supabase
