@@ -43,11 +43,8 @@ CREATE INDEX IF NOT EXISTS idx_frame_stats_timestamp ON frame_stats(timestamp);
 
 class Database:
     def __init__(self, path: str = "data/events.db"):
-        self.path = Path(path)
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(self.path, check_same_thread=False)
-        self._conn.executescript(SCHEMA)
-        self._conn.commit()
+        self.conn = psycopg.connect(os.environ["DATABASE_URL"])
+        self.conn.autocommit = True
 
     def insert_event(self, event: Event):
         import json
