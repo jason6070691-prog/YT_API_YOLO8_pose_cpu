@@ -1,0 +1,96 @@
+# ==============================================================
+# config.yaml — 專案全域設定
+# 對應 Workflow: 所有模組共用同一份設定，方便集中調整參數
+# ==============================================================
+
+# ---------- 1. YouTube Video / Live ----------
+source:
+  youtube_url: "https://www.youtube.com/live/M24SZJU-uoo?si=F8zWQHaH4hLCDBNZ"  # 目標 YouTube 影片/直播網址
+  preferred_max_height: 720        # 串流畫質上限 (p)，避免抓 4K 拖垮效能
+  reconnect_retries: 5             # 串流中斷時的重連次數
+  reconnect_delay_sec: 3
+
+# ---------- 2. Stream Capture ----------
+capture:
+  frame_skip: 2                    # 每 N 幀處理 1 幀，數字越大越省效能
+  buffer_size: 1                   # cv2.CAP_PROP_BUFFERSIZE，避免緩衝累積延遲
+  resize_width: 960                # 進入模型前先縮放，null 表示不縮放
+  save_annotated_frame: true       # 是否定期輸出標註後畫面給 Dashboard 顯示
+  annotated_frame_path: "logs/latest_frame.jpg"
+  annotated_frame_interval_sec: 1  # 存檔頻率
+
+# ---------- 3. YOLOv8-Pose ----------
+model:
+  weights: "yolov8n-pose.pt"       # n/s/m/l/x，越大越準但越慢
+  device: "auto"                   # "auto" | "cpu" | "cuda:0"
+  conf_threshold: 0.3
+  iou_threshold: 0.5
+
+# ---------- 4. Person Tracking ----------
+tracking:
+  tracker: "bytetrack.yaml"        # ultralytics 內建: bytetrack.yaml / botsort.yaml
+  max_history: 60                  # 每個 track 保留多少幀的關鍵點/座標歷史
+  lost_track_ttl_sec: 5            # track 消失多久後視為離場
+
+# ---------- 5. 行為／事件分析 ----------
+behavior:
+  # -- 人數統計 --
+  people_counting:
+    enabled: true
+    overcrowd_threshold: 15        # 單畫面人數超過此值 → 觸發擁擠事件
+    log_interval_sec: 5            # 定期寫入人數統計的頻率
+
+  # -- 異常偵測 --
+  anomaly_detection:
+    enabled: true
+    fall_detection:
+      enabled: true
+      aspect_ratio_threshold: 1.4  # bbox 寬/高 超過此值 → 疑似躺倒
+      vertical_ratio_threshold: 0.55  # 肩到髖的垂直距離 / bbox 高度，低於此值 → 疑似跌倒
+      confirm_frames: 5            # 需連續 N 幀符合才確認事件，降低誤判
+    sudden_motion:
+      enabled: true
+      speed_threshold_px_per_sec: 550   # 追蹤點移動速度超過此值 → 疑似奔跑/衝突
+      confirm_frames: 3
+    loitering:
+      enabled: true
+      dwell_seconds: 30            # 同一人在同一 ROI 停留超過此秒數 → 徘徊事件
+
+  # -- ROI 區域 --
+  roi:
+    enabled: true
+    zones:
+      - name: "入口區"
+        polygon: [[0, 0], [320, 0], [320, 720], [0, 720]]
+        max_capacity: 8            # 超過此人數觸發 ROI 擁擠事件
+      - name: "警戒區"
+        polygon: [[640, 0], [960, 0], [960, 720], [640, 720]]
+        max_capacity: 3
+
+# ---------- 6. Event Engine ----------
+event_engine:
+  dedupe_window_sec: 10             # 同一 track/同一事件類型在此秒數內只記一次
+  severity_map:
+    fall: "critical"
+    sudden_motion: "warning"
+    loitering: "warning"
+    roi_overcrowd: "warning"
+    global_overcrowd: "warning"
+    zone_enter: "info"
+    zone_exit: "info"
+
+# ---------- 7. Database / Log ----------
+database:
+  path: "data/events.db"
+  frame_stats_retention_hours: 72   # 超過此時數的統計資料可由維護腳本清理
+
+# ---------- 8. Alert ----------
+alert:
+  console: true                     # 事件觸發時是否印出到終端機
+  webhook_url: null                 # 可填 Slack/Line Notify 等 webhook，null = 不啟用
+  min_severity: "warning"           # "info" | "warning" | "critical"，低於此等級不發送告警
+
+# ---------- 9. Streamlit Dashboard ----------
+dashboard:
+  refresh_interval_sec: 3
+  max_events_shown: 200
