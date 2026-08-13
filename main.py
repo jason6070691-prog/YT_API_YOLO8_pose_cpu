@@ -29,6 +29,20 @@ from src.behavior_analysis import BehaviorAnalyzer
 from src.event_engine import EventEngine
 from src.database import Database
 from src.alert import AlertDispatcher
+from supabase import create_client
+import os
+
+supabase = create_client(
+    os.environ["SUPABASE_URL"],
+    os.environ["SUPABASE_KEY"]
+)
+
+with open("logs/latest_frame.jpg", "rb") as f:
+    supabase.storage.from_("frames").upload(
+        "latest_frame.jpg",
+        f,
+        file_options={"upsert": True}
+    )
 
 logging.basicConfig(
     level=logging.INFO,
