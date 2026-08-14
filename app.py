@@ -27,9 +27,12 @@ df = pd.read_sql(
     conn
 )
 
-st.image(
-    f"{os.environ['SUPABASE_URL']}/storage/v1/object/public/frames/latest_frame.jpg"
+image_url = (
+    os.environ["SUPABASE_URL"]
+    + "/storage/v1/object/public/frames/latest_frame.jpg"
 )
+
+st.image(image_url, use_container_width=True)
 
 # 讓 dashboard/app.py 可以 import 到專案根目錄下的 src/
 sys.path.append(str(Path(__file__).resolve().parent.parent))
