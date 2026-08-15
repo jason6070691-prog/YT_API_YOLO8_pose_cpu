@@ -32,3 +32,6 @@ f"{SUPABASE_URL}/storage/v1/object/public/frames/latest_frame.jpg?t={int(time.ti
 st.image(image_url, use_container_width=True)
 
 st.success("如果本機 main.py 正在執行，畫面會自動更新。")
+
+time.sleep(2)
+st.rerun()
