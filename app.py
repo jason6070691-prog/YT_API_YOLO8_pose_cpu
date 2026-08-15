@@ -9,8 +9,8 @@ st.set_page_config(page_title="YOLOv8 Dashboard", layout="wide")
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 
 if not SUPABASE_URL:
-st.error("請在 Render 設定 SUPABASE_URL 環境變數")
-st.stop()
+  st.error("請在 Render 設定 SUPABASE_URL 環境變數")
+  st.stop()
 
 st.title("🎥 YOLOv8 即時監控 Dashboard")
 
