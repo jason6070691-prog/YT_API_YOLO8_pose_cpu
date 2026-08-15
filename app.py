@@ -1,5 +1,3 @@
-from future import annotations
-
 import os
 import time
 import streamlit as st
