@@ -37,12 +37,24 @@ supabase = create_client(
     os.environ["SUPABASE_KEY"]
 )
 
-with open("logs/latest_frame.jpg", "rb") as f:
-    supabase.storage.from_("frames").upload(
-        "latest_frame.jpg",
-        f,
-        file_options={"upsert": True}
-    )
+def upload_latest_frame():
+    frame_path = Path("logs/latest_frame.jpg")
+
+    if not frame_path.exists():
+        return
+
+    with open(frame_path, "rb") as f:
+        try:
+            supabase.storage.from_("frames").upload(
+                path="latest_frame.jpg",
+                file=f,
+                file_options={
+                    "cache-control": "3600",
+                    "upsert": "true"
+                }
+            )
+        except Exception:
+            pass
 
 logging.basicConfig(
     level=logging.INFO,
@@ -166,6 +178,7 @@ def run(config_path: str = "config.yaml", url_override: str | None = None, show_
                 now - last_frame_save >= config.capture.annotated_frame_interval_sec
             ):
                 cv2.imwrite(str(annotated_path), annotated)
+                upload_latest_frame()
                 last_frame_save = now
 
             if show_window:
