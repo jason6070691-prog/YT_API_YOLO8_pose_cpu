@@ -1,118 +1,246 @@
 """
 database.py
-對應 Workflow: Event Engine → Database / Log
-
-輕量 SQLite 儲存層，不需額外安裝資料庫伺服器，方便 Demo / 單機部署。
-Streamlit Dashboard 直接讀這個 SQLite 檔案來畫圖表。
+Supabase 儲存層
 
 資料表:
-  events        - 所有觸發的事件 (跌倒/異常移動/徘徊/ROI擁擠/進出區域...)
-  frame_stats   - 定期寫入的人數統計時序資料，用來畫「人數趨勢圖」
+  events       - 所有觸發的事件
+  frame_stats  - 人數統計時序資料
 """
+
 from __future__ import annotations
-import sqlite3
-import time
-from pathlib import Path
-from typing import List, Optional
+
+import json
+import os
+from typing import Optional
+
+from supabase import create_client, Client
 
 from .types import Event
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    event_type TEXT NOT NULL,
-    severity TEXT NOT NULL,
-    track_id INTEGER,
-    zone TEXT,
-    message TEXT NOT NULL,
-    extra_json TEXT,
-    timestamp REAL NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS frame_stats (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    current_count INTEGER NOT NULL,
-    cumulative_unique_count INTEGER NOT NULL,
-    timestamp REAL NOT NULL
-);
-
-CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);
-CREATE INDEX IF NOT EXISTS idx_frame_stats_timestamp ON frame_stats(timestamp);
-"""
-
 
 class Database:
-    def __init__(self, path: str = "data/events.db"):
-        self.conn = psycopg.connect(os.environ["DATABASE_URL"])
-        self.conn.autocommit = True
+    def __init__(self):
+        # 取得 Render / 本機環境變數
+        self.supabase_url = os.getenv("SUPABASE_URL")
+        self.supabase_key = os.getenv("SUPABASE_KEY")
+
+        if not self.supabase_url:
+            raise RuntimeError(
+                "找不到 SUPABASE_URL，請確認環境變數是否設定。"
+            )
+
+        if not self.supabase_key:
+            raise RuntimeError(
+                "找不到 SUPABASE_KEY，請確認環境變數是否設定。"
+            )
+
+        # 建立 Supabase Client
+        self.client: Client = create_client(
+            self.supabase_url,
+            self.supabase_key,
+        )
+
+        print("✅ Supabase Database 已連線")
+
+    # --------------------------------------------------
+    # Events
+    # --------------------------------------------------
 
     def insert_event(self, event: Event):
-        import json
-        self._conn.execute(
-            "INSERT INTO events (event_type, severity, track_id, zone, message, extra_json, timestamp) "
-            "VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (
-                event.event_type,
-                event.severity,
-                event.track_id,
-                event.zone,
-                event.message,
-                json.dumps(event.extra, ensure_ascii=False),
-                event.timestamp,
-            ),
-        )
-        self._conn.commit()
+        """寫入事件到 Supabase events"""
 
-    def insert_frame_stats(self, current_count: int, cumulative_unique_count: int, timestamp: Optional[float] = None):
-        self._conn.execute(
-            "INSERT INTO frame_stats (current_count, cumulative_unique_count, timestamp) VALUES (?, ?, ?)",
-            (current_count, cumulative_unique_count, timestamp or time.time()),
-        )
-        self._conn.commit()
+        data = {
+            "event_type": event.event_type,
+            "severity": event.severity,
+            "track_id": event.track_id,
+            "zone": event.zone,
+            "message": event.message,
+            "extra_json": event.extra,
+            "timestamp": event.timestamp,
+        }
 
-    def recent_events(self, limit: int = 200, min_severity: Optional[str] = None) -> list[dict]:
-        severity_order = {"info": 0, "warning": 1, "critical": 2}
-        query = "SELECT event_type, severity, track_id, zone, message, extra_json, timestamp FROM events "
-        params: list = []
+        response = (
+            self.client
+            .table("events")
+            .insert(data)
+            .execute()
+        )
+
+        return response
+
+    # --------------------------------------------------
+    # Frame Stats
+    # --------------------------------------------------
+
+    def insert_frame_stats(
+        self,
+        current_count: int,
+        cumulative_unique_count: int,
+        timestamp: Optional[float] = None,
+    ):
+        """寫入人數統計到 Supabase frame_stats"""
+
+        import time
+
+        data = {
+            "current_count": current_count,
+            "cumulative_unique_count": cumulative_unique_count,
+            "timestamp": timestamp if timestamp is not None else time.time(),
+        }
+
+        response = (
+            self.client
+            .table("frame_stats")
+            .insert(data)
+            .execute()
+        )
+
+        return response
+
+    # --------------------------------------------------
+    # 最近事件
+    # --------------------------------------------------
+
+    def recent_events(
+        self,
+        limit: int = 200,
+        min_severity: Optional[str] = None,
+    ) -> list[dict]:
+
+        severity_order = {
+            "info": 0,
+            "warning": 1,
+            "critical": 2,
+        }
+
+        query = (
+            self.client
+            .table("events")
+            .select(
+                "event_type, severity, track_id, "
+                "zone, message, extra_json, timestamp"
+            )
+        )
+
+        # 過濾最低嚴重程度
         if min_severity in severity_order:
-            allowed = [s for s, v in severity_order.items() if v >= severity_order[min_severity]]
-            placeholders = ",".join("?" * len(allowed))
-            query += f"WHERE severity IN ({placeholders}) "
-            params += allowed
-        query += "ORDER BY timestamp DESC LIMIT ?"
-        params.append(limit)
+            allowed = [
+                severity
+                for severity, value in severity_order.items()
+                if value >= severity_order[min_severity]
+            ]
 
-        cur = self._conn.execute(query, params)
-        cols = [c[0] for c in cur.description]
-        return [dict(zip(cols, row)) for row in cur.fetchall()]
+            query = query.in_("severity", allowed)
 
-    def recent_frame_stats(self, since_ts: Optional[float] = None, limit: int = 500) -> list[dict]:
-        if since_ts is not None:
-            cur = self._conn.execute(
-                "SELECT current_count, cumulative_unique_count, timestamp FROM frame_stats "
-                "WHERE timestamp >= ? ORDER BY timestamp ASC LIMIT ?",
-                (since_ts, limit),
+        response = (
+            query
+            .order("timestamp", desc=True)
+            .limit(limit)
+            .execute()
+        )
+
+        return response.data or []
+
+    # --------------------------------------------------
+    # 最近人數統計
+    # --------------------------------------------------
+
+    def recent_frame_stats(
+        self,
+        since_ts: Optional[float] = None,
+        limit: int = 500,
+    ) -> list[dict]:
+
+        query = (
+            self.client
+            .table("frame_stats")
+            .select(
+                "current_count, "
+                "cumulative_unique_count, "
+                "timestamp"
             )
+        )
+
+        if since_ts is not None:
+            query = query.gte("timestamp", since_ts)
+
+            response = (
+                query
+                .order("timestamp", desc=False)
+                .limit(limit)
+                .execute()
+            )
+
+            return response.data or []
+
         else:
-            cur = self._conn.execute(
-                "SELECT current_count, cumulative_unique_count, timestamp FROM frame_stats "
-                "ORDER BY timestamp DESC LIMIT ?",
-                (limit,),
+            response = (
+                query
+                .order("timestamp", desc=True)
+                .limit(limit)
+                .execute()
             )
-        cols = [c[0] for c in cur.description]
-        rows = [dict(zip(cols, row)) for row in cur.fetchall()]
-        return rows if since_ts is not None else list(reversed(rows))
 
-    def event_counts_by_type(self, since_ts: Optional[float] = None) -> list[dict]:
-        query = "SELECT event_type, COUNT(*) as cnt FROM events "
-        params: list = []
+            rows = response.data or []
+
+            # 保持和原本 SQLite 版本相同：
+            # 最舊 → 最新
+            return list(reversed(rows))
+
+    # --------------------------------------------------
+    # 事件統計
+    # --------------------------------------------------
+
+    def event_counts_by_type(
+        self,
+        since_ts: Optional[float] = None,
+    ) -> list[dict]:
+
+        query = (
+            self.client
+            .table("events")
+            .select("event_type")
+        )
+
         if since_ts is not None:
-            query += "WHERE timestamp >= ? "
-            params.append(since_ts)
-        query += "GROUP BY event_type ORDER BY cnt DESC"
-        cur = self._conn.execute(query, params)
-        cols = [c[0] for c in cur.description]
-        return [dict(zip(cols, row)) for row in cur.fetchall()]
+            query = query.gte("timestamp", since_ts)
+
+        response = query.execute()
+
+        rows = response.data or []
+
+        # Supabase REST 查回資料後，在 Python 統計
+        counts = {}
+
+        for row in rows:
+            event_type = row.get("event_type")
+
+            if event_type:
+                counts[event_type] = counts.get(event_type, 0) + 1
+
+        result = [
+            {
+                "event_type": event_type,
+                "cnt": count,
+            }
+            for event_type, count in counts.items()
+        ]
+
+        result.sort(
+            key=lambda x: x["cnt"],
+            reverse=True,
+        )
+
+        return result
+
+    # --------------------------------------------------
+    # 關閉
+    # --------------------------------------------------
 
     def close(self):
-        self._conn.close()
+        """
+        Supabase client 不需要像 SQLite 一樣手動 close。
+        保留此方法是為了讓原本 main.py 不需要修改。
+        """
+
+        print("Supabase Database connection released.")
