@@ -360,7 +360,6 @@ if events:
             "event_type": "事件類型",
             "severity": "嚴重程度",
             "track_id": "人物 ID",
-            "zone": "區域",
         }
     )
 
@@ -369,7 +368,6 @@ if events:
         "事件類型",
         "嚴重程度",
         "人物 ID",
-        "區域",
     ]
 
     display_columns = [
